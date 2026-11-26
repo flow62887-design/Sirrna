@@ -15,8 +15,11 @@ jobs:
       - run: eval "$FIND_ZIP"
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '17' }
-      - uses: android-actions/setup-android@v3
-      - run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+      - name: Android SDK (preinstalled on the runner)
+        run: |
+          SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"; [ -x "$SM" ] || SM=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -n1); echo "sdkmanager: $SM"
+          yes | "$SM" --licenses > /dev/null || true
+          "$SM" "platforms;android-34" "build-tools;34.0.0"
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: '8.7' }
       - name: Keystore (optional secret KEYSTORE_B64)
