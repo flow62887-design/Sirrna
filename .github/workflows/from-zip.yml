@@ -52,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api: [26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36]
+        api: [29, 30, 31, 33, 34, 35, 36]
     steps:
       - uses: actions/checkout@v4
       - run: eval "$FIND_ZIP"
@@ -91,8 +91,9 @@ jobs:
         with:
           api-level: ${{ matrix.api }}
           target: google_apis
-          arch: ${{ matrix.api == 27 && 'x86' || 'x86_64' }}
-          profile: pixel_5
+          arch: x86_64
+          profile: Nexus One
+          cores: 4
           ram-size: 3072M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
