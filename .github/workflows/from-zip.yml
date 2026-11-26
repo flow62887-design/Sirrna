@@ -2,7 +2,7 @@ name: from-zip
 on: workflow_dispatch
 env:
   FIND_ZIP: |
-    Z=$(ls sirrna-source-*.zip | sort -V | tail -n1); echo "zip: $Z"
+    ls -la sirrna-source-*.zip; Z=$(ls sirrna-source-*.zip | sort -V | tail -n1); echo "zip: $Z"
     rm -rf "$RUNNER_TEMP/s"; unzip -q "$Z" -d "$RUNNER_TEMP/s"
     A=$(find "$RUNNER_TEMP/s" -maxdepth 3 -name android-nearby-test -type d | head -n1)
     test -n "$A" || { echo "android-nearby-test not found in zip"; exit 1; }
@@ -48,7 +48,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api: [29, 31, 33, 34, 35, 36]
+        api: [29, 30, 31, 33, 34, 35, 36]
     steps:
       - uses: actions/checkout@v4
       - run: eval "$FIND_ZIP"
@@ -60,16 +60,33 @@ jobs:
       - run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules; sudo udevadm trigger --name-match=kvm
+      - name: Write test script
+        run: |
+          cat > "$RUNNER_TEMP/run.sh" <<'EOS'
+          cd "$GITHUB_WORKSPACE"; mkdir -p out
+          echo "== smoke script has v15.3 fixes (reconnect count, 1 or more = yes): $(grep -c reconnect "$ROOT/emu/cdp-smoke.js")"
+          adb install -r apk/sirrna-DEMO.apk
+          echo "== webview:"; adb shell dumpsys package com.google.android.webview | grep versionName; adb shell dumpsys package com.android.webview | grep versionName
+          adb logcat -c
+          (cd "$ROOT/emu" && OUT="$GITHUB_WORKSPACE/out/shots" node cdp-smoke.js) 2>&1 | tee out/smoke.log
+          R=${PIPESTATUS[0]}
+          adb exec-out screencap -p > out/final.png
+          echo "== screenshots:"; ls -la out/shots
+          echo "== window state:"; adb shell dumpsys window | grep -E "mCurrentFocus|isKeyguardShowing|mScreenOn" | head
+          adb logcat -d > out/logcat.txt
+          echo "== logcat (webview/crash/app lines):"; grep -iE "chromium|webview|FATAL|AndroidRuntime|sirrna|ANR in|Console" out/logcat.txt | tail -60
+          exit $R
+          EOS
       - uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api }}
           target: google_apis
-          arch: x86_64
+          arch: ${{ matrix.api == 27 && 'x86' || 'x86_64' }}
           profile: pixel_5
           ram-size: 3072M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
-          script: bash -c 'adb install -r apk/sirrna-DEMO.apk; adb logcat -c; mkdir -p out; cd "$ROOT/emu"; OUT="$GITHUB_WORKSPACE/out/shots" node cdp-smoke.js 2>&1 | tee "$GITHUB_WORKSPACE/out/smoke.log"; R=${PIPESTATUS[0]}; adb logcat -d > "$GITHUB_WORKSPACE/out/logcat.txt"; exit $R'
+          script: bash ${{ runner.temp }}/run.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: "emulator-api-${{ matrix.api }}", path: out }
