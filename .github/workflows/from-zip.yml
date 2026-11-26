@@ -22,6 +22,10 @@ jobs:
           "$SM" "platforms;android-34" "build-tools;34.0.0"
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: '8.7' }
+      - name: Compat gate (old WebView syntax check)
+        run: |
+          cd "$RUNNER_TEMP" && npm init -y >/dev/null && npm i acorn@8 >/dev/null
+          cd "$ROOT" && NODE_PATH="$RUNNER_TEMP/node_modules" node tools/compat-check.js
       - name: Keystore (optional secret KEYSTORE_B64)
         env: { K: "${{ secrets.KEYSTORE_B64 }}" }
         run: |
@@ -48,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api: [29, 30, 31, 33, 34, 35, 36]
+        api: [26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36]
     steps:
       - uses: actions/checkout@v4
       - run: eval "$FIND_ZIP"
@@ -63,18 +67,24 @@ jobs:
       - name: Write test script
         run: |
           cat > "$RUNNER_TEMP/run.sh" <<'EOS'
-          cd "$GITHUB_WORKSPACE"; mkdir -p out
-          echo "== smoke script has v15.3 fixes (reconnect count, 1 or more = yes): $(grep -c reconnect "$ROOT/emu/cdp-smoke.js")"
-          adb install -r apk/sirrna-DEMO.apk
-          echo "== webview:"; adb shell dumpsys package com.google.android.webview | grep versionName; adb shell dumpsys package com.android.webview | grep versionName
+          set +e
+          cd "$GITHUB_WORKSPACE"; mkdir -p out/shots
+          echo "[stage 1] start. smoke script v15.3+ markers (1 or more = yes): $(grep -c reconnect "$ROOT/emu/cdp-smoke.js")"
+          echo "[stage 2] install"; adb install -r apk/sirrna-DEMO.apk; echo "install exit=$?"
+          echo "[stage 3] webview:"; adb shell dumpsys package com.google.android.webview | grep versionName; adb shell dumpsys package com.android.webview | grep versionName
           adb logcat -c
-          (cd "$ROOT/emu" && OUT="$GITHUB_WORKSPACE/out/shots" node cdp-smoke.js) 2>&1 | tee out/smoke.log
-          R=${PIPESTATUS[0]}
+          echo "[stage 4] smoke test starts"
+          (cd "$ROOT/emu" && OUT="$GITHUB_WORKSPACE/out/shots" node cdp-smoke.js) > out/smoke.log 2>&1
+          R=$?
+          echo "[stage 5] smoke test finished, exit=$R"; cat out/smoke.log
           adb exec-out screencap -p > out/final.png
-          echo "== screenshots:"; ls -la out/shots
-          echo "== window state:"; adb shell dumpsys window | grep -E "mCurrentFocus|isKeyguardShowing|mScreenOn" | head
+          echo "[stage 6] screenshots:"; ls out/shots
           adb logcat -d > out/logcat.txt
-          echo "== logcat (webview/crash/app lines):"; grep -iE "chromium|webview|FATAL|AndroidRuntime|sirrna|ANR in|Console" out/logcat.txt | tail -60
+          echo "[stage 7] logcat (webview/crash/console lines):"; grep -iE "chromium.*CONSOLE|FATAL|AndroidRuntime|ANR in|Uncaught" out/logcat.txt | tail -40
+          echo "[stage 8] window state:"; adb shell dumpsys window | grep -E "mCurrentFocus|isKeyguardShowing" | head -4
+          echo "=============== SUMMARY (api ${API:-?}) ==============="
+          grep -E "PASS|FAIL|passed|DIAG" out/smoke.log
+          echo "smoke exit code: $R"
           exit $R
           EOS
       - uses: reactivecircus/android-emulator-runner@v2
